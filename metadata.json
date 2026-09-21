@@ -1,0 +1,8 @@
+
+{
+  "name": "SafeVault",
+  "description": "A premium secure cloud storage dashboard with AI-powered file insights, modern grid/list views, and robust file management capabilities.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
