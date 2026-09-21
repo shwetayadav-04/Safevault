@@ -55,15 +55,16 @@ if (s3Bucket && s3AccessKey && s3SecretKey) {
 // ==========================================
 // 2. MongoDB Atlas Connection
 // ==========================================
-const mongoUri = process.env.MONGODB_URI || '';
+const rawMongoUri = process.env.MONGODB_URI || '';
+const mongoUri = rawMongoUri.trim().replace(/^["']|["']$/g, '');
 
-if (mongoUri) {
+if (mongoUri && (mongoUri.startsWith('mongodb://') || mongoUri.startsWith('mongodb+srv://'))) {
   mongoose
     .connect(mongoUri)
     .then(() => console.log(' Connected to MongoDB Atlas Database'))
     .catch((err) => console.error('❌ MongoDB Atlas connection error:', err.message));
 } else {
-  console.warn('⚠️ MONGODB_URI not found in .env.local. Please add your connection string.');
+  console.warn('⚠️ MONGODB_URI not found or invalid scheme in .env. Please check your connection string.');
 }
 
 // ==========================================
