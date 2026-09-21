@@ -440,10 +440,12 @@ app.get('/api/health', (req, res) => {
 const distPath = path.resolve(__dirname, '../dist');
 app.use(express.static(distPath));
 
-app.get('*', (req, res) => {
+// Express 5 SPA catch-all fallback
+app.use((req, res) => {
   res.sendFile(path.resolve(distPath, 'index.html'));
 });
 
 app.listen(PORT, () => {
-  console.log(` SafeVault Server running on http://localhost:${PORT}`);
+  console.log(`🚀 SafeVault Server running on http://localhost:${PORT}`);
 });
+
