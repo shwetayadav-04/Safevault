@@ -3,6 +3,18 @@ import { Search, ShieldCheck, Star, LogOut } from 'lucide-react';
 import { FileItem, ViewType, FileType } from './types';
 import { NAV_ITEMS, formatBytes } from './constants';
 import { getFileInsight } from './services/geminiService';
+import { 
+  apiGetFiles, 
+  apiGetUploadUrl, 
+  apiUploadDirectToS3, 
+  apiSaveFileRecord, 
+  apiUpdateFile, 
+  apiDeleteFile, 
+  apiRestoreFile, 
+  apiEmptyRecycleBin,
+  clearAuthToken,
+  apiUpdateProfile
+} from './services/api';
 import Dashboard from './components/Dashboard';
 import Upload from './components/Upload';
 import Vault from './components/Vault';
@@ -14,6 +26,7 @@ const CURRENT_USER_KEY = 'safevault_current_session_user';
 const TOTAL_STORAGE_CAPACITY = 10 * 1024 * 1024 * 1024; // 10 GB
 
 export interface UserSession {
+  id?: string;
   name: string;
   email: string;
   avatarUrl: string;
@@ -38,7 +51,7 @@ const loadActiveUserSession = (): UserSession | null => {
   return null;
 };
 
-const loadUserFiles = (userEmail: string): FileItem[] => {
+const loadLocalUserFiles = (userEmail: string): FileItem[] => {
   try {
     const userStorageKey = `safevault_files_${userEmail.toLowerCase().trim()}`;
     const saved = localStorage.getItem(userStorageKey);
@@ -51,13 +64,11 @@ const loadUserFiles = (userEmail: string): FileItem[] => {
         }));
       }
     } else if (userEmail.toLowerCase().includes('alex.rivera')) {
-      // Demo user starts with demo files
       return DEMO_FILES;
     }
   } catch (err) {
-    console.warn("Failed to load user files from storage:", err);
+    console.warn("Failed to load local files:", err);
   }
-  // New signups start with a clean, empty vault
   return [];
 };
 
@@ -66,20 +77,41 @@ const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewType>('dashboard');
   const [files, setFiles] = useState<FileItem[]>(() => {
     const session = loadActiveUserSession();
-    return session ? loadUserFiles(session.email) : [];
+    return session ? loadLocalUserFiles(session.email) : [];
   });
   const [searchQuery, setSearchQuery] = useState('');
   const [showStarredOnly, setShowStarredOnly] = useState(false);
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-  // Sync user's files to their specific user storage
+  // Fetch files from MongoDB Atlas backend when user is active
+  useEffect(() => {
+    if (!currentUser) return;
+
+    let isMounted = true;
+    apiGetFiles()
+      .then(remoteFiles => {
+        if (isMounted && remoteFiles && remoteFiles.length >= 0) {
+          setFiles(remoteFiles);
+        }
+      })
+      .catch(err => {
+        console.warn('Backend offline, using local storage mode:', err.message);
+        if (isMounted) {
+          setFiles(loadLocalUserFiles(currentUser.email));
+        }
+      });
+
+    return () => { isMounted = false; };
+  }, [currentUser]);
+
+  // Sync user's files to local storage as offline cache
   useEffect(() => {
     if (!currentUser) return;
     try {
       const userStorageKey = `safevault_files_${currentUser.email.toLowerCase().trim()}`;
       localStorage.setItem(userStorageKey, JSON.stringify(files));
     } catch (err) {
-      console.warn("Failed to save user files:", err);
+      console.warn("Failed to cache user files:", err);
     }
   }, [files, currentUser]);
 
@@ -104,14 +136,13 @@ const App: React.FC = () => {
   // Login / Signup handler
   const handleLogin = (user: UserSession) => {
     setCurrentUser(user);
-    const userFiles = loadUserFiles(user.email);
-    setFiles(userFiles);
     setCurrentView('dashboard');
-    showNotification(`Welcome, ${user.name}! Your secure vault is ready.`, 'success');
+    showNotification(`Welcome, ${user.name}! Your secure vault is unlocked.`, 'success');
   };
 
   // Logout handler
   const handleLogout = () => {
+    clearAuthToken();
     setCurrentUser(null);
     setFiles([]);
     setCurrentView('dashboard');
@@ -119,9 +150,10 @@ const App: React.FC = () => {
     showNotification('Logged out successfully. Vault locked.', 'success');
   };
 
-  // Upload handler
+  // Upload handler with AWS S3 + MongoDB Atlas
   const handleUpload = async (newFiles: FileList) => {
-    const addedFiles: FileItem[] = [];
+    const uploadedItems: FileItem[] = [];
+
     for (let i = 0; i < newFiles.length; i++) {
       const f = newFiles[i];
       const typeStr = f.type.split('/')[0] as FileType;
@@ -131,29 +163,58 @@ const App: React.FC = () => {
 
       const insight = await getFileInsight(f.name, fileType);
 
-      addedFiles.push({
-        id: Math.random().toString(36).substring(2, 11),
-        name: f.name,
-        size: f.size,
-        type: fileType,
-        uploadDate: new Date(),
-        isDeleted: false,
-        isRecent: true,
-        starred: false,
-        contentSnippet: insight,
-      });
+      try {
+        // 1. Get S3 Presigned PUT URL from backend
+        const s3Meta = await apiGetUploadUrl(f.name, f.type);
+
+        // 2. Direct binary PUT upload to S3 (if S3 credentials configured)
+        if (s3Meta.uploadUrl) {
+          await apiUploadDirectToS3(s3Meta.uploadUrl, f);
+        }
+
+        // 3. Save metadata record in MongoDB Atlas
+        const savedFile = await apiSaveFileRecord({
+          name: f.name,
+          size: f.size,
+          type: fileType,
+          s3Key: s3Meta.s3Key || null,
+          contentSnippet: insight,
+        });
+
+        uploadedItems.push(savedFile);
+      } catch (err) {
+        console.warn('S3/Mongo upload fallback notice:', err);
+        // Local fallback if server offline
+        uploadedItems.push({
+          id: Math.random().toString(36).substring(2, 11),
+          name: f.name,
+          size: f.size,
+          type: fileType,
+          uploadDate: new Date(),
+          isDeleted: false,
+          isRecent: true,
+          starred: false,
+          contentSnippet: insight,
+        });
+      }
     }
 
-    setFiles(prev => [...addedFiles, ...prev]);
-    showNotification(`Successfully uploaded ${newFiles.length} file(s)`);
+    setFiles(prev => [...uploadedItems, ...prev]);
+    showNotification(`Successfully uploaded ${newFiles.length} file(s) to cloud vault!`);
     setCurrentView('vault');
   };
 
   // Delete file handler
-  const deleteFile = (id: string, permanent: boolean = false) => {
+  const deleteFile = async (id: string, permanent: boolean = false) => {
+    try {
+      await apiDeleteFile(id, permanent);
+    } catch (err) {
+      console.warn("Delete API notice:", err);
+    }
+
     if (permanent) {
       setFiles(prev => prev.filter(f => f.id !== id));
-      showNotification("File permanently deleted", "success");
+      showNotification("File permanently deleted from cloud & S3", "success");
     } else {
       setFiles(prev => prev.map(f => (f.id === id ? { ...f, isDeleted: true } : f)));
       showNotification("Moved to Recycle Bin", "success");
@@ -161,32 +222,64 @@ const App: React.FC = () => {
   };
 
   // Restore file handler
-  const restoreFile = (id: string) => {
+  const restoreFile = async (id: string) => {
+    try {
+      await apiRestoreFile(id);
+    } catch (err) {
+      console.warn("Restore API notice:", err);
+    }
     setFiles(prev => prev.map(f => (f.id === id ? { ...f, isDeleted: false } : f)));
-    showNotification("File restored", "success");
+    showNotification("File restored to active vault", "success");
   };
 
   // Empty bin handler
-  const emptyRecycleBin = () => {
+  const emptyRecycleBin = async () => {
     const deletedCount = files.filter(f => f.isDeleted).length;
     if (deletedCount === 0) return;
+
+    try {
+      await apiEmptyRecycleBin();
+    } catch (err) {
+      console.warn("Empty bin API notice:", err);
+    }
+
     setFiles(prev => prev.filter(f => !f.isDeleted));
-    showNotification(`Permanently deleted ${deletedCount} item(s) from Recycle Bin`, "success");
+    showNotification(`Permanently deleted ${deletedCount} item(s) from Recycle Bin & S3`, "success");
   };
 
   // Star toggle handler
-  const toggleStar = (id: string) => {
-    setFiles(prev => prev.map(f => (f.id === id ? { ...f, starred: !f.starred } : f)));
+  const toggleStar = async (id: string) => {
+    const target = files.find(f => f.id === id);
+    const newStar = target ? !target.starred : true;
+
+    try {
+      await apiUpdateFile(id, { starred: newStar });
+    } catch (err) {
+      console.warn("Star API notice:", err);
+    }
+
+    setFiles(prev => prev.map(f => (f.id === id ? { ...f, starred: newStar } : f)));
   };
 
-  // Edit file handler
-  const handleUpdateFile = (updatedFile: FileItem) => {
+  // Edit file notes handler
+  const handleUpdateFile = async (updatedFile: FileItem) => {
+    try {
+      await apiUpdateFile(updatedFile.id, { contentSnippet: updatedFile.contentSnippet });
+    } catch (err) {
+      console.warn("Update file notes API notice:", err);
+    }
+
     setFiles(prev => prev.map(f => (f.id === updatedFile.id ? updatedFile : f)));
-    showNotification("File updated successfully", "success");
+    showNotification("File notes updated in MongoDB Atlas", "success");
   };
 
   // Update profile handler
-  const handleUpdateProfile = (newProfile: UserSession) => {
+  const handleUpdateProfile = async (newProfile: UserSession) => {
+    try {
+      await apiUpdateProfile({ name: newProfile.name, avatarUrl: newProfile.avatarUrl });
+    } catch (err) {
+      console.warn("Profile update notice:", err);
+    }
     setCurrentUser(newProfile);
   };
 

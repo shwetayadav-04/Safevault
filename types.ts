@@ -11,6 +11,7 @@ export interface FileItem {
   isRecent: boolean;
   starred: boolean;
   contentSnippet?: string; // For AI summaries
+  s3Key?: string | null;
 }
 
 export interface StorageStats {

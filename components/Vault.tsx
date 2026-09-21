@@ -13,6 +13,8 @@ import {
 import { FileItem } from '../types';
 import { formatBytes, getFileIcon } from '../constants';
 
+import { apiGetDownloadUrl } from '../services/api';
+
 interface VaultProps {
   files: FileItem[];
   onDelete: (id: string) => void;
@@ -37,8 +39,21 @@ const Vault: React.FC<VaultProps> = ({
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<string>('newest');
 
-  // Trigger browser file download
-  const handleDownloadFile = (file: FileItem) => {
+  // Trigger browser file download (from S3 or Blob)
+  const handleDownloadFile = async (file: FileItem) => {
+    try {
+      if (file.id && file.s3Key) {
+        const s3DownloadUrl = await apiGetDownloadUrl(file.id);
+        if (s3DownloadUrl) {
+          window.open(s3DownloadUrl, '_blank');
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('S3 download notice:', err);
+    }
+
+    // Fallback to local encrypted file generator
     const fileContent = file.contentSnippet 
       ? `File Name: ${file.name}\nType: ${file.type}\nSize: ${formatBytes(file.size)}\nUpload Date: ${new Date(file.uploadDate).toLocaleString()}\n\nAI Insight & Notes:\n${file.contentSnippet}`
       : `SafeVault Encrypted Document: ${file.name}\nSize: ${formatBytes(file.size)}\nUpload Date: ${new Date(file.uploadDate).toLocaleString()}`;

@@ -1,38 +1,26 @@
 # ==========================================
-# Stage 1: Build the React application
+# Full-Stack Production Container for SafeVault
 # ==========================================
-FROM node:20-alpine AS builder
+FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy dependency manifests
+# Copy dependency files
 COPY package.json package-lock.json ./
 
 # Install dependencies cleanly
 RUN npm ci
 
-# Copy source code and configs
+# Copy full application source code
 COPY . .
 
-# Build the production bundle
+# Build the React production bundle to /app/dist
 RUN npm run build
 
-# ==========================================
-# Stage 2: Serve with lightweight Nginx
-# ==========================================
-FROM nginx:alpine
-
-# Remove default nginx static assets
-RUN rm -rf /usr/share/nginx/html/*
-
-# Copy built assets from builder stage
-COPY --from=builder /app/dist /usr/share/nginx/html
-
-# Copy custom Nginx configuration for SPA routing
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-
-# Expose standard HTTP port
+# Expose port 80 for web traffic
+ENV PORT=80
+ENV NODE_ENV=production
 EXPOSE 80
 
-# Start Nginx server in foreground
-CMD ["nginx", "-g", "daemon off;"]
+# Start unified Node.js API + Static React Server
+CMD ["node", "server/index.js"]

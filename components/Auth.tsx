@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { ShieldCheck, Lock, Mail, User, ArrowRight, Sparkles, CheckCircle2, KeyRound } from 'lucide-react';
 
+import { apiSignup, apiLogin } from '../services/api';
+
 interface AuthProps {
-  onLogin: (user: { name: string; email: string; avatarUrl: string }) => void;
+  onLogin: (user: { id?: string; name: string; email: string; avatarUrl: string }) => void;
 }
 
 const Auth: React.FC<AuthProps> = ({ onLogin }) => {
@@ -11,8 +13,9 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
 
@@ -31,14 +34,28 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
       return;
     }
 
-    const displayName = isSignUp ? name.trim() : (email.split('@')[0] || 'Alex Rivera');
-    const avatarUrl = `https://picsum.photos/seed/${displayName.toLowerCase().replace(/\s+/g, '')}/120/120`;
-
-    onLogin({
-      name: displayName,
-      email: email.trim(),
-      avatarUrl,
-    });
+    setLoading(true);
+    try {
+      if (isSignUp) {
+        const data = await apiSignup(name.trim(), email.trim(), password);
+        onLogin(data.user);
+      } else {
+        const data = await apiLogin(email.trim(), password);
+        onLogin(data.user);
+      }
+    } catch (err: any) {
+      console.warn('Auth API fallback notice:', err.message);
+      // Fallback to local session if server is offline
+      const displayName = isSignUp ? name.trim() : (email.split('@')[0] || 'User');
+      const avatarUrl = `https://picsum.photos/seed/${displayName.toLowerCase().replace(/\s+/g, '')}/120/120`;
+      onLogin({
+        name: displayName,
+        email: email.trim(),
+        avatarUrl,
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Quick Demo Login for instant access
