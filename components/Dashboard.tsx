@@ -5,12 +5,13 @@ import { formatBytes, getFileIcon } from '../constants';
 
 interface DashboardProps {
   files: FileItem[];
+  userName?: string;
   onViewVault: () => void;
 }
 
 const TOTAL_CAPACITY_BYTES = 10 * 1024 * 1024 * 1024; // 10 GB
 
-const Dashboard: React.FC<DashboardProps> = ({ files, onViewVault }) => {
+const Dashboard: React.FC<DashboardProps> = ({ files, userName = 'User', onViewVault }) => {
   const activeFiles = files.filter(f => !f.isDeleted);
   const totalSize = activeFiles.reduce((acc, f) => acc + f.size, 0);
   const recentFiles = [...activeFiles]
@@ -62,7 +63,7 @@ const Dashboard: React.FC<DashboardProps> = ({ files, onViewVault }) => {
       {/* Top Welcome & Quick Jump */}
       <div className="flex justify-between items-end">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">Welcome back, Alex!</h1>
+          <h1 className="text-2xl font-bold text-slate-800">Welcome back, {userName}!</h1>
           <p className="text-slate-500">Here's what's happening in your vault today.</p>
         </div>
         <button 

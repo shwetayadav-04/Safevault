@@ -10,119 +10,113 @@ import RecycleBin from './components/RecycleBin';
 import Settings from './components/Settings';
 import Auth from './components/Auth';
 
-const STORAGE_KEY = 'safevault_stored_files';
-const PROFILE_STORAGE_KEY = 'safevault_user_profile';
-const AUTH_STORAGE_KEY = 'safevault_auth_state';
+const CURRENT_USER_KEY = 'safevault_current_session_user';
 const TOTAL_STORAGE_CAPACITY = 10 * 1024 * 1024 * 1024; // 10 GB
 
-const DEFAULT_PROFILE = {
-  name: 'Alex Rivera',
-  email: 'alex.rivera@example.com',
-  avatarUrl: 'https://picsum.photos/seed/alex/120/120',
-};
+export interface UserSession {
+  name: string;
+  email: string;
+  avatarUrl: string;
+}
 
-const DEFAULT_FILES: FileItem[] = [
-  { id: '1', name: 'resume_2024.pdf', size: 245000, type: 'pdf', uploadDate: new Date(), isDeleted: false, isRecent: true, starred: true, contentSnippet: 'Professional resume with updated experience in web engineering.' },
+const DEMO_FILES: FileItem[] = [
+  { id: '1', name: 'resume_2024.pdf', size: 245000, type: 'pdf', uploadDate: new Date(), isDeleted: false, isRecent: true, starred: true, contentSnippet: 'Professional resume with updated experience in cloud and web engineering.' },
   { id: '2', name: 'vacation_photo.jpg', size: 3500000, type: 'image', uploadDate: new Date(Date.now() - 86400000), isDeleted: false, isRecent: true, starred: false, contentSnippet: 'High-resolution landscape photo from summer trip.' },
   { id: '3', name: 'project_backup.zip', size: 120000000, type: 'archive', uploadDate: new Date(Date.now() - 172800000), isDeleted: false, isRecent: false, starred: false, contentSnippet: 'Compressed source code archive and database snapshot.' },
   { id: '4', name: 'notes.txt', size: 5000, type: 'document', uploadDate: new Date(), isDeleted: false, isRecent: true, starred: false, contentSnippet: 'Meeting minutes and action items from product sync.' },
-  { id: '5', name: 'deleted_draft.docx', size: 15000, type: 'document', uploadDate: new Date(), isDeleted: true, isRecent: false, starred: false, contentSnippet: 'Draft document slated for deletion.' },
 ];
 
-const loadInitialFiles = (): FileItem[] => {
+const loadActiveUserSession = (): UserSession | null => {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = localStorage.getItem(CURRENT_USER_KEY);
+    if (saved) {
+      return JSON.parse(saved);
+    }
+  } catch (err) {
+    console.warn("Failed to load user session:", err);
+  }
+  return null;
+};
+
+const loadUserFiles = (userEmail: string): FileItem[] => {
+  try {
+    const userStorageKey = `safevault_files_${userEmail.toLowerCase().trim()}`;
+    const saved = localStorage.getItem(userStorageKey);
     if (saved) {
       const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed)) {
         return parsed.map((file: any) => ({
           ...file,
           uploadDate: new Date(file.uploadDate),
         }));
       }
+    } else if (userEmail.toLowerCase().includes('alex.rivera')) {
+      // Demo user starts with demo files
+      return DEMO_FILES;
     }
   } catch (err) {
-    console.warn("Failed to load files from localStorage:", err);
+    console.warn("Failed to load user files from storage:", err);
   }
-  return DEFAULT_FILES;
-};
-
-const loadInitialProfile = () => {
-  try {
-    const saved = localStorage.getItem(PROFILE_STORAGE_KEY);
-    if (saved) {
-      return JSON.parse(saved);
-    }
-  } catch (err) {
-    console.warn("Failed to load profile from localStorage:", err);
-  }
-  return DEFAULT_PROFILE;
-};
-
-const loadInitialAuth = (): boolean => {
-  try {
-    const saved = localStorage.getItem(AUTH_STORAGE_KEY);
-    return saved !== null ? JSON.parse(saved) : true;
-  } catch {
-    return true;
-  }
+  // New signups start with a clean, empty vault
+  return [];
 };
 
 const App: React.FC = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(loadInitialAuth);
+  const [currentUser, setCurrentUser] = useState<UserSession | null>(loadActiveUserSession);
   const [currentView, setCurrentView] = useState<ViewType>('dashboard');
-  const [files, setFiles] = useState<FileItem[]>(loadInitialFiles);
-  const [userProfile, setUserProfile] = useState(loadInitialProfile);
+  const [files, setFiles] = useState<FileItem[]>(() => {
+    const session = loadActiveUserSession();
+    return session ? loadUserFiles(session.email) : [];
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [showStarredOnly, setShowStarredOnly] = useState(false);
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-  // Sync auth state to localStorage
+  // Sync user's files to their specific user storage
   useEffect(() => {
+    if (!currentUser) return;
     try {
-      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(isAuthenticated));
+      const userStorageKey = `safevault_files_${currentUser.email.toLowerCase().trim()}`;
+      localStorage.setItem(userStorageKey, JSON.stringify(files));
     } catch (err) {
-      console.warn("Failed to save auth state to localStorage:", err);
+      console.warn("Failed to save user files:", err);
     }
-  }, [isAuthenticated]);
+  }, [files, currentUser]);
 
-  // Sync files to localStorage whenever changed
+  // Sync active user session
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(files));
+      if (currentUser) {
+        localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
+      } else {
+        localStorage.removeItem(CURRENT_USER_KEY);
+      }
     } catch (err) {
-      console.warn("Failed to save files to localStorage:", err);
+      console.warn("Failed to save session:", err);
     }
-  }, [files]);
-
-  // Sync user profile to localStorage whenever changed
-  useEffect(() => {
-    try {
-      localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(userProfile));
-    } catch (err) {
-      console.warn("Failed to save user profile to localStorage:", err);
-    }
-  }, [userProfile]);
+  }, [currentUser]);
 
   const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 3000);
   };
 
-  // Login handler
-  const handleLogin = (user: { name: string; email: string; avatarUrl: string }) => {
-    setUserProfile(user);
-    setIsAuthenticated(true);
+  // Login / Signup handler
+  const handleLogin = (user: UserSession) => {
+    setCurrentUser(user);
+    const userFiles = loadUserFiles(user.email);
+    setFiles(userFiles);
     setCurrentView('dashboard');
-    showNotification(`Welcome back, ${user.name}!`, 'success');
+    showNotification(`Welcome, ${user.name}! Your secure vault is ready.`, 'success');
   };
 
   // Logout handler
   const handleLogout = () => {
-    setIsAuthenticated(false);
+    setCurrentUser(null);
+    setFiles([]);
     setCurrentView('dashboard');
     setShowStarredOnly(false);
-    showNotification('Logged out successfully', 'success');
+    showNotification('Logged out successfully. Vault locked.', 'success');
   };
 
   // Upload handler
@@ -192,8 +186,8 @@ const App: React.FC = () => {
   };
 
   // Update profile handler
-  const handleUpdateProfile = (newProfile: { name: string; email: string; avatarUrl: string }) => {
-    setUserProfile(newProfile);
+  const handleUpdateProfile = (newProfile: UserSession) => {
+    setCurrentUser(newProfile);
   };
 
   // Toggle starred filter from header
@@ -208,8 +202,8 @@ const App: React.FC = () => {
     }
   };
 
-  // If user is not logged in, render the Auth (Login/Signup) Page
-  if (!isAuthenticated) {
+  // If user is not logged in, render the Auth (Login/Signup) Page first
+  if (!currentUser) {
     return (
       <>
         <Auth onLogin={handleLogin} />
@@ -226,7 +220,7 @@ const App: React.FC = () => {
     );
   }
 
-  // Calculate dynamic storage usage
+  // Calculate dynamic storage usage for active user
   const activeFiles = files.filter(f => !f.isDeleted);
   const totalUsedBytes = activeFiles.reduce((acc, f) => acc + f.size, 0);
   const storagePercentage = Math.min(100, (totalUsedBytes / TOTAL_STORAGE_CAPACITY) * 100);
@@ -345,11 +339,11 @@ const App: React.FC = () => {
               className="flex items-center gap-3 cursor-pointer hover:bg-slate-50 p-1.5 rounded-xl transition-colors"
             >
               <div className="text-right hidden sm:block">
-                <p className="text-sm font-semibold text-slate-800">{userProfile.name}</p>
+                <p className="text-sm font-semibold text-slate-800">{currentUser.name}</p>
                 <p className="text-xs text-slate-500">Pro Plan</p>
               </div>
               <img 
-                src={userProfile.avatarUrl} 
+                src={currentUser.avatarUrl} 
                 className="w-10 h-10 rounded-full border-2 border-white shadow-sm object-cover" 
                 alt="Profile" 
               />
@@ -362,6 +356,7 @@ const App: React.FC = () => {
           {currentView === 'dashboard' && (
             <Dashboard 
               files={files} 
+              userName={currentUser.name}
               onViewVault={() => {
                 setShowStarredOnly(false);
                 setCurrentView('vault');
@@ -404,7 +399,7 @@ const App: React.FC = () => {
 
           {currentView === 'settings' && (
             <Settings 
-              userProfile={userProfile}
+              userProfile={currentUser}
               onUpdateProfile={handleUpdateProfile}
               onLogout={handleLogout}
               onNotification={showNotification} 
